@@ -1,0 +1,323 @@
+package de.uniwue.jpp.testing;
+
+import de.uniwue.jpp.testing.enums.DishType;
+import de.uniwue.jpp.testing.enums.GuestType;
+import de.uniwue.jpp.testing.interfaces.DayManager;
+import de.uniwue.jpp.testing.interfaces.Dish;
+import de.uniwue.jpp.testing.interfaces.Guest;
+import de.uniwue.jpp.testing.interfaces.Order;
+import de.uniwue.jpp.testing.util.AbstractTestClass;
+import de.uniwue.jpp.testing.util.DataGenerator;
+import net.bytebuddy.asm.Advice;
+import org.junit.jupiter.api.Test;
+
+import java.time.LocalDate;
+import java.time.Month;
+import java.util.*;
+
+import static de.uniwue.jpp.testing.util.TestUtils.assertListIsUnmodifiable;
+import static de.uniwue.jpp.testing.util.TestUtils.assertThrowsWithMessage;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+public class TestSimpleDayManager extends AbstractTestClass<DayManager> {
+
+    @Test
+    public void testConstructorValidArguments(){
+        try {
+            construct(LocalDate.of(2025,11,1), 1,2);
+            construct(LocalDate.of(2035,1,13), 2,4);
+            construct(LocalDate.of(2044,12,14), 3,6);
+            construct(LocalDate.of(2024,7,16), 4,1);
+            construct(LocalDate.of(2054,5,21), 9,8);
+        }catch (Exception e){
+            throw new AssertionError("Testing valid arguments for DayManager constructor");
+        }
+    }
+
+    @Test
+    public void testConstructorInvalidArguments(){
+        assertThrowsWithMessage(IllegalArgumentException.class,
+                                () -> construct(null, 2, 2),
+                                "Date must not be null!",
+                                "Testing invalid date argument for DayManager constructor");
+
+        assertThrowsWithMessage(IllegalArgumentException.class,
+                () -> construct(LocalDate.of(2007,31,44), 2, 2),
+                "Date must not be before current date!",
+                "Testing invalid date argument for DayManager constructor");
+
+        assertThrowsWithMessage(IllegalArgumentException.class,
+                () -> construct(LocalDate.of(2025,2,3), null, 2),
+                "NumberOfTimeSlots must not be null!",
+                "Testing invalid numberOfTimeSlots argument for DayManager constructor");
+
+        assertThrowsWithMessage(IllegalArgumentException.class,
+                () -> construct(LocalDate.of(2025,2,3), 2, null),
+                "CapacityPerSlot must not be null!",
+                "Testing invalid capacityPerSlot argument for DayManager constructor");
+
+        assertThrowsWithMessage(IllegalArgumentException.class,
+                () -> construct(LocalDate.of(2025,2,3), -1, 2),
+                "NumberOfTimeSlots must not be zero or negative!",
+                "Testing invalid numberOfTimeSlots argument for DayManager constructor");
+
+        assertThrowsWithMessage(IllegalArgumentException.class,
+                () -> construct(LocalDate.of(2025,2,3), 2, -1),
+                "CapacityPerSlot must not be zero or negative!",
+                "Testing invalid capacityPerSlot argument for DayManager constructor");
+    }
+
+    @Test
+    public void testAddOrderInvalidArguments(){
+        DayManager dayManager = construct(LocalDate.of(2025, Month.AUGUST,11), 2,2);
+        Guest guest = mock(Guest.class);
+        when(guest.getName()).thenReturn("Guest");
+        when(guest.getGuestType()).thenReturn(GuestType.GUEST);
+
+        Dish dish = mock(Dish.class);
+        when(dish.getDishType()).thenReturn(DishType.MAIN_DISH);
+        when(dish.getName()).thenReturn("Dish");
+        when(dish.getBasePrice()).thenReturn(1.3);
+
+        Order order = mock(Order.class);
+        when(order.getGuest()).thenReturn(guest);
+        when(order.getDishes()).thenReturn(Arrays.asList(dish));
+
+
+
+
+        assertThrowsWithMessage(IllegalArgumentException.class,
+                                () -> dayManager.addOrder(null),
+                                "Order must not be null!",
+                                "Testing invalid order argument for addOrder()");
+
+        assertThrowsWithMessage(IllegalArgumentException.class,
+                () -> dayManager.addOrder(order, -5),
+                "Illegal slot index!",
+                "Testing invalid slot argument for addOrder()");
+
+        //PreferedSlot must not be negative!
+
+        assertThrowsWithMessage(IllegalArgumentException.class,
+                                () -> {
+                                    dayManager.addOrder(order);
+                                    dayManager.addOrder(order);
+                                },
+                                "Illegal order: This guest has already ordered!",
+                                "Testing invalid order argument for addOrder()");
+
+
+
+        assertThrowsWithMessage(IllegalArgumentException.class,
+                () -> dayManager.addOrder(null, 0),
+                "Order must not be null!",
+                "Testing invalid order argument for addOrder()");
+
+
+    }
+
+    @Test
+    public void testAddOrderWithSlotArgument(){
+        int[][] scenarios = {{1, 1}, {1, 5}, {3, 2}, {5, 4}};
+        for (int[] scenario : scenarios) {
+            int slots = scenario[0];
+            int capacity = scenario[1];
+            DayManager dayManager = construct(LocalDate.of(2026, 5, 7), slots, capacity);
+            StringBuilder stringBuilder = new StringBuilder();
+
+            stringBuilder.append("Executing addOrder sequence on a DayManager with ")
+                    .append(slots).append(" time slots and ")
+                    .append(capacity).append(" capacity per slot:\n");
+
+            if (dayManager == null) {
+                throw new AssertionError(stringBuilder + "Wrong return value");
+            }
+
+                List<Order> allOrders = new ArrayList<>();
+                double sum = 0.0;
+
+                for (int slotCounter = 0; slotCounter < slots; slotCounter++) {
+                    List<Order> ordersInSlot = new ArrayList<>();
+                    for (int orderNum = 1; orderNum <= capacity; orderNum++) {
+                        Order order = DataGenerator.createOrderMock(orderNum);
+                        stringBuilder.append("Adding Order with preferred slot ").append(slotCounter).append("\n");
+                        if (null == order) {
+                            throw new AssertionError(stringBuilder.append("Wrong return value").toString());
+                        }
+                        sum += order.calculatePrice();
+                        allOrders.add(order);
+                        ordersInSlot.add(order);
+
+                        Optional<Integer> slotNumber = dayManager.addOrder(order, slotCounter);
+                        if (slotNumber.isPresent()) {
+                            if ((slotNumber.get() != slotCounter)) {
+                                throw new AssertionError(stringBuilder.append("excpected: ").append(slotCounter).append(" but got: ").append(slotNumber.get()).toString());
+                            }
+                        } else {
+                            throw new AssertionError("Wrong return value");
+                        }
+                        List<Order> ordersAll = dayManager.getAllOrders();
+                        List<Order> forSlotOrders = dayManager.getOrdersForSlot(slotCounter);
+                        String mesage = stringBuilder + "Wrong return value";
+                        if (null == ordersAll || null == forSlotOrders) {
+                            throw new AssertionError(mesage);
+                        }
+                    }
+                }
+                try {
+                    String mesage = stringBuilder.append("Wrong return value").toString();
+                    Order extraOrder = DataGenerator.createOrderMock(slots * capacity + 1);
+                    if (null == extraOrder){
+                        throw new AssertionError(mesage);
+                    }
+                    dayManager.addOrder(extraOrder, 0);
+                    stringBuilder.append("adding Order with preferred slot ").append(slots).append("\n");
+                }catch (IllegalArgumentException e){
+
+                }
+            }
+        }
+
+
+
+
+    @Test
+    public void testAddOrderWithoutSlotArgument() {
+        int[][] scenarios = {{1, 1}, {3, 2}};
+
+        for (int[] scenario : scenarios) {
+            DayManager manager = construct(LocalDate.now(), scenario[0], scenario[1]);
+            for (int i = 0; i < scenario[0] * scenario[1]; i++) {
+                Order order = DataGenerator.createOrderMock(i + 1);
+                Optional<Integer> result = manager.addOrder(order);
+                assertTrue(result.isPresent(), "Erwartet, dass ein Slot für die Bestellung verfügbar ist.");
+            }
+
+            Order overflowOrder = DataGenerator.createOrderMock(scenario[0] * scenario[1] + 1);
+            Optional<Integer> overflowResult = manager.addOrder(overflowOrder);
+            assertFalse(overflowResult.isPresent(), "Erwartet, dass kein Slot verfügbar ist, da der Manager voll sein sollte.");
+        }
+    }
+
+    @Test
+    public void testGetOrdersForSlot(){
+        int[][] scenarios = {{1, 1}, {1, 5}, {3, 2}, {5, 4}};
+
+        for (int[] scenario : scenarios) {
+            DayManager manager = construct(LocalDate.now(), scenario[0], scenario[1]);
+            for (int i = 0; i < scenario[0] * scenario[1]; i++) {
+                Order order = DataGenerator.createOrderMock(i + 1);
+                manager.addOrder(order);
+            }
+
+            for (int slot = 0; slot < scenario[0]; slot++) {
+                List<Order> ordersForSlot = manager.getOrdersForSlot(slot);
+                assertNotNull(ordersForSlot, "Erwartet, dass eine Liste von Bestellungen zurückgegeben wird.");
+                assertListIsUnmodifiable(ordersForSlot, "List returned by getOrdersForSlot() is modifiable");
+            }
+        }
+    }
+
+    @Test
+    public void testGetAllOrders() {
+        int[][] scenarios = {{1, 1}, {1, 5}, {3, 2}, {5, 4}};
+
+        for (int[] scenario : scenarios) {
+            DayManager manager = construct(LocalDate.now(), scenario[0], scenario[1]);
+            for (int i = 0; i < scenario[0] * scenario[1]; i++) {
+                Order order = DataGenerator.createOrderMock(i + 1);
+                manager.addOrder(order);
+            }
+
+            List<Order> allOrders = manager.getAllOrders();
+            assertNotNull(allOrders, "Erwartet, dass eine Liste von allen Bestellungen zurückgegeben wird.");
+            assertListIsUnmodifiable(allOrders, "List returned by getAllOrders() is modifiable");
+        }
+    }
+
+    @Test
+    public void testCalculateEarnings(){
+        DayManager dayManager = construct(LocalDate.of(2025,11,11), 1,1);
+
+
+        /*
+        Guest guest = mock(Guest.class);
+        when(guest.getGuestType()).thenReturn(GuestType.STUDENT);
+        Dish dish = mock(Dish.class);
+        when(dish.getBasePrice()).thenReturn(1.1);
+        Order order = mock(Order.class);
+        when(order.getDishes()).thenReturn(List.of(dish));
+        when(order.getGuest()).thenReturn(guest);
+        dayManager.addOrder(order);
+        assertEquals(1.1, dayManager.calculateEarnings(), "Blu");
+
+
+
+
+
+        List<Dish> dish1 = DataGenerator.createDishMocks(1,1,1,0); // Price 0,5+1+1,5
+        List<Dish> dish2 = DataGenerator.createDishMocks(0,1,1,0); // Price 1,5
+        List<Dish> dish3 = DataGenerator.createDishMocks(1,0,0,1); // Price 1,5
+        List<Dish> dish4 = DataGenerator.createDishMocks(1,1,1,1); // Price 5
+        List<Dish> dish5 = DataGenerator.createDishMocks(0,0,0,0); // Price 0
+
+        List<String> guestNames = DataGenerator.createGuestNames(5);
+        List<Guest> guests = DataGenerator.createGuestMocks(2,2,1);
+
+        for (int i = 0; i<guestNames.size(); i++){
+            when(guests.get(i).getName()).thenReturn(guestNames.get(i));
+            guests.add(guests.get(i));
+        }
+
+        List<Order> orders = new ArrayList<>();
+        for (int i = 0; i<5;i++){
+            Order order = mock(Order.class);
+            when(order.)
+            orders.add
+        }
+
+         */
+
+
+        Order order1 = DataGenerator.createOrderMock(1);
+        Order order2 = DataGenerator.createOrderMock(2);
+        Order order3 = DataGenerator.createOrderMock(3);
+        Order order4 = DataGenerator.createOrderMock(4);
+        Order order5 = DataGenerator.createOrderMock(5);
+
+
+
+        assertEquals(dayManager.calculateEarnings(), 0.0, 0.001, "Incorrect Price1");
+
+        dayManager.addOrder(order1);
+        assertEquals(dayManager.calculateEarnings(), 0.5, 0.001, "Incorrect Price2");
+        dayManager.addOrder(order2);
+        assertEquals(dayManager.calculateEarnings(), 1.5, 0.001, "Incorrect Price3");
+        dayManager.addOrder(order3);
+        assertEquals(dayManager.calculateEarnings(), 3.0, 0.001, "Incorrect Price4");
+        dayManager.addOrder(order4);
+        assertEquals(dayManager.calculateEarnings(), 5.0, 0.001, "Incorrect Price5");
+        dayManager.addOrder(order5);
+        assertEquals(dayManager.calculateEarnings(), 7.5, 0.001, "Incorrect Price6");
+
+
+
+    }
+
+    @Test
+    public void testToString(){
+        DayManager manager1 = construct(LocalDate.of(2030,1,2),1,2);
+        DayManager manager2 = construct(LocalDate.of(2031,12,12),14,22);
+        DayManager manager3 = construct(LocalDate.of(2032,2,21),9,21);
+        DayManager manager4 = construct(LocalDate.of(2033,3,25),4,5);
+        DayManager manager5 = construct(LocalDate.of(2034,4,26),7,8);
+
+        assertEquals(manager1.toString(), "SimpleDayManager (02.01.30)", "Incorrect string representation returned by toString");
+        assertEquals(manager2.toString(), "SimpleDayManager (12.12.31)", "Incorrect string representation returned by toString");
+        assertEquals(manager3.toString(), "SimpleDayManager (21.02.32)", "Incorrect string representation returned by toString");
+        assertEquals(manager4.toString(), "SimpleDayManager (25.03.33)", "Incorrect string representation returned by toString");
+        assertEquals(manager5.toString(), "SimpleDayManager (26.04.34)", "Incorrect string representation returned by toString");
+    }
+}
